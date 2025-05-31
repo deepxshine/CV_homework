@@ -172,3 +172,9 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+.idea
+./.idea
+
+task1/CamVid/
+task1/SegNet-Tutorial-master/
+task1/best_deeplabv3_camvid.pth
