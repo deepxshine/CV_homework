@@ -41,8 +41,7 @@ print(f"Masks found: {len(mask_paths)}")
 
 assert len(image_paths) > 0, "Изображения не найдены"
 assert len(mask_paths) > 0, "Маски не найдены"
-assert len(image_paths) == len(
-    mask_paths), "Количество изображений и масок не совпадает"
+assert len(image_paths) == len(mask_paths), "Количество изображений и масок не совпадает"
 
 image_paths = image_paths[:1000]
 mask_paths = mask_paths[:1000]
@@ -72,7 +71,6 @@ class CamVidDataset(Dataset):
 
         return image, mask
 
-
 # Аугментации для тренировочных данных включают:
 # - RandomScale: случайное масштабирование
 # - HorizontalFlip: горизонтальное отражение
@@ -84,7 +82,6 @@ train_transform = A.Compose([
     A.HorizontalFlip(p=0.5),
     A.RandomBrightnessContrast(p=0.5),
     A.Affine(translate_percent=0.1, scale=(0.9, 1.1), rotate=15, p=0.5),
-    # заменил ShiftScaleRotate на Affine (предупреждение albumentations)
     A.Resize(224, 224),
     A.Normalize(mean=(0.485, 0.456, 0.406),
                 std=(0.229, 0.224, 0.225)),
@@ -98,18 +95,19 @@ val_transform = A.Compose([
     ToTensorV2()
 ])
 
-dataset = CamVidDataset(image_paths, mask_paths, transform=train_transform)
+val_size = int(0.2 * len(image_paths))
+train_size = len(image_paths) - val_size
 
-val_size = int(0.2 * len(dataset))
-train_size = len(dataset) - val_size
+train_image_paths = image_paths[:train_size]
+train_mask_paths = mask_paths[:train_size]
+val_image_paths = image_paths[train_size:]
+val_mask_paths = mask_paths[train_size:]
 
-train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
-val_dataset.dataset.transform = val_transform  # меняем трансформации для валидации
+train_dataset = CamVidDataset(train_image_paths, train_mask_paths, transform=train_transform)
+val_dataset = CamVidDataset(val_image_paths, val_mask_paths, transform=val_transform)
 
-train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True,
-                          num_workers=0)
-val_loader = DataLoader(val_dataset, batch_size=8, shuffle=False,
-                        num_workers=0)
+train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=0)
+val_loader = DataLoader(val_dataset, batch_size=8, shuffle=False, num_workers=0)
 
 # Используется модель DeepLabV3 с ResNet50 в качестве backbone
 # Выбор обоснован тем, что DeepLabV3 показывает хорошие результаты в задачах семантической сегментации
@@ -120,13 +118,13 @@ model.aux_classifier[4] = nn.Conv2d(256, 12, kernel_size=1)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model.to(device)
+
 # Используется кросс-энтропийная функция потерь, подходящая для задач классификации
 criterion = nn.CrossEntropyLoss()
 # Оптимизатор AdamW с learning rate 3e-4 (типичное значение для подобных задач)
 optimizer = optim.AdamW(model.parameters(), lr=3e-4)
 # Планировщик learning rate с уменьшением в 10 раз каждые 10 эпох
 scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
-
 
 #  Функция для подсчета mean IoU
 def mean_iou(preds, labels, num_classes=12):
@@ -145,7 +143,6 @@ def mean_iou(preds, labels, num_classes=12):
     ious = [iou for iou in ious if not np.isnan(iou)]
     return np.mean(ious)
 
-
 #  Обучение на одну эпоху
 def train_epoch(model, loader, optimizer, criterion, device):
     model.train()
@@ -162,7 +159,6 @@ def train_epoch(model, loader, optimizer, criterion, device):
 
         running_loss += loss.item() * images.size(0)
     return running_loss / len(loader.dataset)
-
 
 # Основная метрика - mean Intersection over Union (mIoU)
 # Показывает насколько хорошо совпадают предсказанные и истинные сегменты
@@ -183,7 +179,6 @@ def eval_model(model, loader, criterion, device):
             total_iou += mean_iou(preds, masks)
     return running_loss / len(loader.dataset), total_iou / len(loader)
 
-
 # Обучение
 num_epochs = 30
 best_iou = 0
@@ -197,9 +192,7 @@ for epoch in range(num_epochs):
         best_iou = val_iou
         torch.save(model.state_dict(), 'best_deeplabv3_camvid.pth')
 
-    print(
-        f"Epoch {epoch + 1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val mIoU: {val_iou:.4f}")
-
+    print(f"Epoch {epoch + 1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val mIoU: {val_iou:.4f}")
 
 # Функция для визуального сравнения исходного изображения,
 # истинной маски и предсказания модели
@@ -212,10 +205,8 @@ def visualize_and_save_sample(model, dataset, device, idx=0, epoch=None):
 
     fig, ax = plt.subplots(1, 3, figsize=(15, 5))
 
-    # Денормализация изображения
     img_np = image.permute(1, 2, 0).cpu().numpy()
-    img_np = img_np * np.array([0.229, 0.224, 0.225]) + np.array(
-        [0.485, 0.456, 0.406])
+    img_np = img_np * np.array([0.229, 0.224, 0.225]) + np.array([0.485, 0.456, 0.406])
     img_np = np.clip(img_np, 0, 1)
 
     ax[0].imshow(img_np)
@@ -230,7 +221,6 @@ def visualize_and_save_sample(model, dataset, device, idx=0, epoch=None):
     ax[2].set_title('Prediction')
     ax[2].axis('off')
 
-    # Генерируем имя файла с timestamp и номером эпохи
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if epoch is not None:
         filename = f"sample_epoch_{epoch}_{timestamp}.png"
@@ -239,9 +229,6 @@ def visualize_and_save_sample(model, dataset, device, idx=0, epoch=None):
 
     save_path = output_dir / filename
     plt.show()
-    # plt.savefig(save_path, bbox_inches='tight', dpi=100)
-    # plt.close(fig)
-    print(f"Saved visualization to {save_path}")
 
 
 visualize_and_save_sample(model, val_dataset, device, idx=10)
